@@ -1,0 +1,12 @@
+.DS_Store
+build/
+*.app
+示例音频/
+
+# 本机配置文件（不随仓库分发）
+config.json
+cache.json
+gbif.json
+status.log
+app.log
+tools/
