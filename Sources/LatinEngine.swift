@@ -271,9 +271,25 @@ enum LatinEngine {
         return false
     }
 
-    // MARK: - IPA（英式学院派）
+    // MARK: - 发音方案
 
-    static func ipa(_ syllables: [[LUnit]], stress: Int) -> String {
+    enum Scheme: String, CaseIterable {
+        case british
+        case ecclesiastical
+        case classical
+
+        var title: String {
+            switch self {
+            case .british: return "英式学院派"
+            case .ecclesiastical: return "教会式（意式）"
+            case .classical: return "恢复古典"
+            }
+        }
+    }
+
+    // MARK: - IPA
+
+    static func ipa(_ syllables: [[LUnit]], stress: Int, scheme: Scheme) -> String {
         var flat: [LUnit] = []
         var bounds: [Int] = []
         for s in syllables { bounds.append(flat.count); flat.append(contentsOf: s) }
@@ -289,17 +305,20 @@ enum LatinEngine {
             if i == bounds[stress] { out += "ˈ"; lastCons = "" }
             let unit = flat[i]
             let next: LUnit? = i + 1 < flat.count ? flat[i + 1] : nil
+            let prev: LUnit? = i > 0 ? flat[i - 1] : nil
 
             switch unit {
             case .vowel(let v):
                 let open = (i + 1 >= flat.count) || starts.contains(i + 1)
                 out += vowelIPA(v, stressed: sylIndex == stress, open: open,
-                                isFinal: sylIndex == bounds.count - 1)
+                                isFinal: sylIndex == bounds.count - 1, scheme: scheme)
                 lastCons = ""
             case .cons(let c):
-                let chunk = consIPA(c, next: next?.text ?? "", initial: i == 0)
-                // 叠辅音在英式读法里只发一次
-                if chunk.count == 1 && chunk == lastCons { continue }
+                let chunk = consIPA(c, next: next?.text ?? "", initial: i == 0,
+                                    prevVowel: prev?.isVowel ?? false,
+                                    nextVowel: next?.isVowel ?? false,
+                                    scheme: scheme)
+                if chunk.count == 1 && chunk == lastCons && scheme != .classical { continue }
                 out += chunk
                 lastCons = chunk
             }
@@ -307,7 +326,17 @@ enum LatinEngine {
         return out
     }
 
-    private static func vowelIPA(_ v: String, stressed: Bool, open: Bool, isFinal: Bool) -> String {
+    private static func vowelIPA(_ v: String, stressed: Bool, open: Bool,
+                                 isFinal: Bool, scheme: Scheme) -> String {
+        switch scheme {
+        case .british: return britishVowel(v, stressed: stressed, open: open, isFinal: isFinal)
+        case .ecclesiastical: return ecclesiasticalVowel(v)
+        case .classical: return classicalVowel(v)
+        }
+    }
+
+    // 英式学院派
+    private static func britishVowel(_ v: String, stressed: Bool, open: Bool, isFinal: Bool) -> String {
         switch v {
         case "ae", "oe": return "iː"
         case "au": return "ɔː"
@@ -347,46 +376,137 @@ enum LatinEngine {
         }
     }
 
-    private static func consIPA(_ c: String, next: String, initial: Bool) -> String {
-        let soft = next.hasPrefix("e") || next.hasPrefix("i") || next.hasPrefix("y")
-            || next.hasPrefix("ae") || next.hasPrefix("oe")
-        switch c {
-        case "ch": return "k"
-        case "ph": return "f"
-        case "th": return "θ"
-        case "rh": return "r"
-        case "qu": return "kw"
-        case "gu": return "ɡw"
-        case "c": return soft ? "s" : "k"
-        case "g": return soft ? "dʒ" : "ɡ"
-        case "x": return initial ? "z" : "ks"
-        case "y": return "j"
-        case "j": return "dʒ"
-        default: return c
+    // 教会式（意式）：单元音不弱化，二合元音读作单元音
+    private static func ecclesiasticalVowel(_ v: String) -> String {
+        switch v {
+        case "ae", "oe": return "e"
+        case "au": return "au"
+        case "eu": return "eu"
+        case "ei": return "ei"
+        case "y": return "i"
+        default: return v
         }
     }
 
-    // MARK: - 英语转写（只给 say 用）
+    // 恢复古典：二合元音读作双元音，元音不弱化
+    private static func classicalVowel(_ v: String) -> String {
+        switch v {
+        case "ae": return "ae̯"
+        case "oe": return "oe̯"
+        case "au": return "au̯"
+        case "eu": return "eu̯"
+        case "ei": return "ei̯"
+        case "y": return "y"
+        default: return v
+        }
+    }
 
-    static func respelling(_ syllables: [[LUnit]], stress: Int) -> String {
+    private static func consIPA(_ c: String, next: String, initial: Bool,
+                                prevVowel: Bool, nextVowel: Bool, scheme: Scheme) -> String {
+        let soft = next.hasPrefix("e") || next.hasPrefix("i") || next.hasPrefix("y")
+            || next.hasPrefix("ae") || next.hasPrefix("oe")
+
+        switch scheme {
+        case .british:
+            switch c {
+            case "ch": return "k"
+            case "ph": return "f"
+            case "th": return "θ"
+            case "rh": return "r"
+            case "qu": return "kw"
+            case "gu": return "ɡw"
+            case "c": return soft ? "s" : "k"
+            case "g": return soft ? "dʒ" : "ɡ"
+            case "x": return initial ? "z" : "ks"
+            case "y": return "j"
+            case "j": return "dʒ"
+            default: return c
+            }
+
+        case .ecclesiastical:
+            switch c {
+            case "ch": return "k"
+            case "ph": return "f"
+            case "th": return "t"
+            case "rh": return "r"
+            case "qu": return "kw"
+            case "gu": return "ɡw"
+            case "c": return soft ? "tʃ" : "k"
+            case "g": return soft ? "dʒ" : "ɡ"
+            case "x": return "ks"
+            case "z": return "dz"
+            case "h": return ""
+            case "s": return (prevVowel && nextVowel) ? "z" : "s"
+            case "y": return "j"
+            default: return c
+            }
+
+        case .classical:
+            switch c {
+            case "ch": return "k"
+            case "ph": return "p"
+            case "th": return "t"
+            case "rh": return "r"
+            case "qu": return "kʷ"
+            case "gu": return "ɡʷ"
+            case "c": return "k"
+            case "g": return "ɡ"
+            case "v": return "w"
+            case "x": return "ks"
+            case "z": return "dz"
+            case "y": return "j"
+            default: return c
+            }
+        }
+    }
+
+    // MARK: - 给语音合成用的转写
+
+    static func respelling(_ syllables: [[LUnit]], stress: Int, scheme: Scheme) -> String {
         var parts: [String] = []
         for (si, syl) in syllables.enumerated() {
             var s = ""
             for (ui, u) in syl.enumerated() {
                 switch u {
                 case .vowel(let v):
-                    s += respellVowel(v, stressed: si == stress, open: ui == syl.count - 1)
+                    s += respellVowel(v, stressed: si == stress,
+                                      open: ui == syl.count - 1, scheme: scheme)
                 case .cons(let c):
                     let nextText = ui + 1 < syl.count ? syl[ui + 1].text : ""
-                    s += respellCons(c, next: nextText)
+                    s += respellCons(c, next: nextText, scheme: scheme)
                 }
             }
             parts.append(s)
         }
+        // 教会式给意大利语音，连字符只在词内断音节
         return parts.joined(separator: "-")
     }
 
-    private static func respellVowel(_ v: String, stressed: Bool, open: Bool) -> String {
+    private static func respellVowel(_ v: String, stressed: Bool, open: Bool, scheme: Scheme) -> String {
+        if scheme == .ecclesiastical {
+            // 意大利语拼写本来就接近拉丁读音，只做最小改动
+            switch v {
+            case "ae", "oe": return "e"
+            case "au": return "au"
+            case "eu": return "eu"
+            case "ei": return "ei"
+            case "y": return "i"
+            default: return v
+            }
+        }
+
+        if scheme == .classical {
+            switch v {
+            case "ae": return "eye"
+            case "oe": return "oy"
+            case "au": return "ow"
+            case "eu": return "ew"
+            case "ei": return "ay"
+            case "y": return "i"
+            default: return (stressed ? v : v)
+            }
+        }
+
         switch v {
         case "ae", "oe": return "ee"
         case "au": return "aw"
@@ -410,19 +530,50 @@ enum LatinEngine {
         }
     }
 
-    private static func respellCons(_ c: String, next: String) -> String {
+    private static func respellCons(_ c: String, next: String, scheme: Scheme) -> String {
         let soft = next.hasPrefix("e") || next.hasPrefix("i") || next.hasPrefix("y")
-        switch c {
-        case "ch": return "k"
-        case "ph": return "f"
-        case "th": return "th"
-        case "rh": return "r"
-        case "qu": return "kw"
-        case "gu": return "gw"
-        case "c": return soft ? "s" : "k"
-        case "g": return soft ? "j" : "g"
-        case "x": return "ks"
-        default: return c
+
+        switch scheme {
+        case .ecclesiastical:
+            switch c {
+            case "ph": return "f"
+            case "th": return "t"
+            case "rh": return "r"
+            case "x": return "cs"
+            case "h": return ""
+            case "y": return "i"
+            default: return c   // c/g/ch/qu 的意大利语读法本来就对
+            }
+
+        case .classical:
+            switch c {
+            case "ch": return "k"
+            case "ph": return "p"
+            case "th": return "t"
+            case "rh": return "r"
+            case "qu": return "kw"
+            case "gu": return "gw"
+            case "c": return "k"
+            case "g": return "g"
+            case "v": return "w"
+            case "x": return "ks"
+            case "z": return "dz"
+            default: return c
+            }
+
+        case .british:
+            switch c {
+            case "ch": return "k"
+            case "ph": return "f"
+            case "th": return "th"
+            case "rh": return "r"
+            case "qu": return "kw"
+            case "gu": return "gw"
+            case "c": return soft ? "s" : "k"
+            case "g": return soft ? "j" : "g"
+            case "x": return "ks"
+            default: return c
+            }
         }
     }
 
@@ -478,19 +629,19 @@ enum LatinEngine {
 
     // MARK: - 对外主入口
 
-    static func pronounceWord(_ word: String) -> Pronunciation.Word {
+    static func pronounceWord(_ word: String, scheme: Scheme) -> Pronunciation.Word {
         let syls = syllablesForName(word)
         let stress = stressIndex(syls, word: word)
         let us = syls.map { units($0) }
         return Pronunciation.Word(syllables: syls,
                                   stress: stress,
-                                  ipa: ipa(us, stress: stress),
-                                  respell: respelling(us, stress: stress))
+                                  ipa: ipa(us, stress: stress, scheme: scheme),
+                                  respell: respelling(us, stress: stress, scheme: scheme))
     }
 
-    static func pronounce(_ name: String) -> Pronunciation {
+    static func pronounce(_ name: String, scheme: Scheme = .british) -> Pronunciation {
         let parts = name.split(separator: " ").map(String.init)
-        let words = parts.map { pronounceWord($0) }
+        let words = parts.map { pronounceWord($0, scheme: scheme) }
         return Pronunciation(word: name, words: words)
     }
 }

@@ -11,9 +11,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var currentRespell = ""
     private var currentTaxon: Taxon?
     private var currentCommon: String?
+    private var schemeItem: NSMenuItem?
     private var lastQuery: String = ""
     private var lastDirection: Direction = .latin
     private var hotKeyStatus: OSStatus = -1
+
+    private var scheme: LatinEngine.Scheme {
+        LatinEngine.Scheme(rawValue: Config.current.scheme) ?? .british
+    }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         setupStatusItem()
@@ -56,6 +61,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         hotKeyItem = hk
         menu.addItem(hk)
         menu.addItem(NSMenuItem(title: "显示示例面板", action: #selector(showDemo), keyEquivalent: ""))
+        menu.addItem(buildSchemeMenu())
         menu.addItem(.separator())
         menu.addItem(NSMenuItem(title: "辅助功能权限…", action: #selector(openAccessibility), keyEquivalent: ""))
         menu.addItem(NSMenuItem(title: "清空缓存（重新联网查）", action: #selector(clearCacheMenu), keyEquivalent: ""))
@@ -161,7 +167,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func wireHUD() {
         hud.onPlayLatin = { [weak self] in
             guard let self = self, !self.currentRespell.isEmpty else { NSSound.beep(); return }
-            Speech.shared.speakLatin(self.currentRespell)
+            Speech.shared.speakLatin(self.currentRespell, scheme: self.scheme)
         }
         hud.onPlayChinese = { [weak self] in
             guard let self = self else { return }
@@ -238,11 +244,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         currentTaxon = nil
         currentCommon = nil
 
-        let p = LatinEngine.pronounce(name)
+        let p = LatinEngine.pronounce(name, scheme: scheme)
         currentRespell = p.respell
 
         hud.show(HUDModel(name: name, pronunciation: p, commonName: nil,
-                          rank: nil, taxonId: nil, note: nil, isPending: true))
+                          rank: nil, taxonId: nil, note: nil, isPending: true,
+                          schemeTitle: scheme.title))
 
         INatClient.shared.lookup(name, forceRefresh: force) { [weak self] result in
             guard let self = self else { return }
@@ -271,8 +278,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
 
             self.currentCommon = common
-            self.hud.update(HUDModel(name: name, pronunciation: p, commonName: common,
-                                     rank: rank, taxonId: tid, note: note, isPending: false))
+            let model = HUDModel(name: name, pronunciation: p, commonName: common,
+                                 rank: rank, taxonId: tid, note: note, isPending: false,
+                                 schemeTitle: self.scheme.title)
+            self.hud.update(model)
+            if let id = tid { self.attachHierarchy(to: model, taxonID: id, force: force) }
         }
     }
 
@@ -308,7 +318,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             guard let self = self else { return }
             switch result {
             case .found(let taxon, let exact):
-                let p = LatinEngine.pronounce(taxon.name)
+                let p = LatinEngine.pronounce(taxon.name, scheme: self.scheme)
                 self.currentTaxon = taxon
                 self.currentName = taxon.name
                 self.currentRespell = p.respell
@@ -319,9 +329,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 if (taxon.preferred_common_name ?? "").isEmpty { note = "该条目在 iNat 上没有中文名" }
                 if query != original { note = "按「\(query)」查得" }
 
-                self.hud.update(HUDModel(name: taxon.name, pronunciation: p,
-                                         commonName: self.currentCommon, rank: taxon.rank,
-                                         taxonId: taxon.id, note: note, isPending: false))
+                let model = HUDModel(name: taxon.name, pronunciation: p,
+                                     commonName: self.currentCommon, rank: taxon.rank,
+                                     taxonId: taxon.id, note: note, isPending: false,
+                                     schemeTitle: self.scheme.title)
+                self.hud.update(model)
+                self.attachHierarchy(to: model, taxonID: taxon.id, force: force)
             case .notFound:
                 self.tryChinese(candidates, at: index + 1, original: original,
                                 empty: empty, force: force)
@@ -390,6 +403,63 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                                      rank: nil, taxonId: nil,
                                      note: lines.joined(separator: "\n"), isPending: false))
         }
+    }
+
+    // MARK: - 发音习惯
+
+    private func buildSchemeMenu() -> NSMenuItem {
+        let sub = NSMenu()
+        for (idx, s) in LatinEngine.Scheme.allCases.enumerated() {
+            let item = NSMenuItem(title: s.title, action: #selector(changeScheme(_:)), keyEquivalent: "")
+            item.tag = idx
+            item.target = self
+            item.state = (s == scheme) ? .on : .off
+            sub.addItem(item)
+        }
+        let parent = NSMenuItem(title: "发音习惯", action: nil, keyEquivalent: "")
+        parent.submenu = sub
+        schemeItem = parent
+        return parent
+    }
+
+    @objc private func changeScheme(_ sender: NSMenuItem) {
+        let all = LatinEngine.Scheme.allCases
+        guard sender.tag >= 0, sender.tag < all.count else { return }
+        let chosen = all[sender.tag]
+        Config.current.scheme = chosen.rawValue
+        Config.current.save()
+        sender.menu?.items.forEach { $0.state = ($0.tag == sender.tag) ? .on : .off }
+
+        guard !lastQuery.isEmpty else { return }
+        if lastDirection == .chinese {
+            presentChinese(lastQuery)
+        } else {
+            present(lastQuery)
+        }
+    }
+
+    // MARK: - 上级分类
+
+    private func attachHierarchy(to model: HUDModel, taxonID: Int, force: Bool) {
+        INatClient.shared.ancestors(of: taxonID, forceRefresh: force) { [weak self] chain in
+            guard let self = self else { return }
+            let text = AppDelegate.formatHierarchy(chain)
+            guard !text.isEmpty else { return }
+            var updated = model
+            updated.hierarchy = text
+            self.hud.update(updated)
+        }
+    }
+
+    static func formatHierarchy(_ chain: [Ancestor]) -> String {
+        let wanted: Set<String> = ["superfamily", "family", "subfamily", "tribe", "subtribe", "genus"]
+        var picked = chain.filter { wanted.contains($0.rank) }
+        // 只剩一两条时，补上更高级的目/总科，避免只显示一个词
+        if picked.count < 2 { picked = Array(chain.suffix(3)) }
+        return picked.map { ancestor -> String in
+            let cn = ancestor.preferred_common_name ?? ""
+            return cn.isEmpty ? ancestor.name : cn
+        }.joined(separator: " › ")
     }
 
     private func showMessage(_ title: String, note: String?) {

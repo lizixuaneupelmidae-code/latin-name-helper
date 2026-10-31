@@ -12,7 +12,8 @@ name), hit ⌘4, and get its pronunciation and iNaturalist Chinese name.
 ## 功能
 
 - **双向查询**：拉丁名 → 中文名，中文名 → 拉丁名，中文名以 [iNaturalist](https://www.inaturalist.org) 为准
-- **读音拆解**：音节切分、主重音、IPA（英式学院派）
+- **读音拆解**：音节切分、主重音、IPA，支持三种发音习惯（英式学院派 / 教会式 / 恢复古典）
+- **上级分类链**：顺手给出「总科 › 科 › 亚科 › 族」，查不到中文名时也能知道这东西大概是什么
 - **朗读**：1 读拉丁名，2 读中文名
 - **复制**：3 复制拉丁名，4 复制中文名
 - **兜底**：iNat 没收录时，退一级给属的中文名，并让 GBIF 判断这个名字是否真实有效
@@ -27,6 +28,10 @@ name), hit ⌘4, and get its pronunciation and iNaturalist Chinese name.
 | iNat 有但没有中文名 | 中文名反查拉丁名 |
 |---|---|
 | ![无中文名](预览_无中文名.png) | ![中文查拉丁](预览_中文查拉丁.png) |
+
+没有中文名时，底部会给上级分类链，比如 `Metcalfa` → `蜡蝉总科 › 蛾蜡蝉科 › 蛾蜡蝉亚科 › 斑蛾蜡蝉族`：
+
+![分类位置](预览_分类位置.png)
 
 ## 用法
 
@@ -99,6 +104,31 @@ security import cert.p12 -k ~/Library/Keychains/login.keychain-db -P latin -T /u
 | Gonatopus | go·**NA**·to·pus | /ɡəˈnætəpəs/ |
 | Echthrodelphax | ech·thro·**DEL**·phax | /ekθrəˈdelfəks/ |
 
+
+## 三种发音习惯
+
+菜单栏图标 →「发音习惯」切换，选择会存进配置，面板上 IPA 后面会标出当前用的是哪一套。
+
+| 方案 | Dryinidae | 说明 |
+|---|---|---|
+| 英式学院派 | /draɪˈɪnɪdiː/ | 英美昆虫学者日常口语，`-idae` 读 /ɪdiː/，`ae` 读 /iː/ |
+| 教会式（意式） | /driˈinide/ | 欧洲大陆传统，单元音不弱化，`c` 在 e/i 前读 /tʃ/；用意大利语音朗读 |
+| 恢复古典 | /dryˈinidae̯/ | 古典学读法，二合元音读成双元音 /ae̯/，`c` 一律 /k/，`v` 读 /w/ |
+
+音节切分和重音位置三套一致，变的只是音值。
+
+## 上级分类链
+
+查到条目后会自动再取一次它的上级链，面板上显示一行：
+
+```
+蜡蝉总科 › 蛾蜡蝉科 › 蛾蜡蝉亚科 › 斑蛾蜡蝉族
+```
+
+- 只取 `总科 / 科 / 亚科 / 族 / 亚族 / 属` 这几级，名称优先用 iNat 中文名，没有就显示拉丁名
+- 链条太短（只剩一条）时，自动补上目一级
+- 缓存 `ancestors.json`，同一分类单元不重复请求
+
 ## 数据来源
 
 - **中文名**：iNaturalist `api.inaturalist.org/v1/taxa/autocomplete?locale=zh-CN`
@@ -124,12 +154,14 @@ security import cert.p12 -k ~/Library/Keychains/login.keychain-db -P latin -T /u
   "chineseVoice": "Tingting",
   "rate": 160,
   "hotKeyCode": 21,
-  "hotKeyModifiers": 256
+  "hotKeyModifiers": 256,
+  "scheme": "british",
+  "ecclesiasticalVoice": "Alice"
 }
 ```
 
 `hotKeyCode` 21 是键盘 4，`hotKeyModifiers` 256 是 ⌘。换成 ⌘⌥4 用 `256+2048`。
-`latinVoice` 换成 `"Alice"` 会变成意大利腔（更接近教会式拉丁）。
+`scheme` 可选 `british` / `ecclesiastical` / `classical`；教会式用 `ecclesiasticalVoice`（默认 Alice，意大利语音）。
 
 ## 已知限制
 

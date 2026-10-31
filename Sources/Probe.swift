@@ -56,8 +56,11 @@ enum Probe {
         let p = LatinEngine.pronounce(name)
         print("学名      \(name)")
         print("音节重音  \(p.display)")
-        print("IPA       \(p.ipa)")
-        print("合成转写  \(p.respell)")
+        for scheme in LatinEngine.Scheme.allCases {
+            let q = LatinEngine.pronounce(name, scheme: scheme)
+            print("IPA(\(scheme.title)) \(q.ipa)")
+            print("  转写    \(q.respell)")
+        }
 
         let sem = DispatchSemaphore(value: 0)
         var lines: [String] = []

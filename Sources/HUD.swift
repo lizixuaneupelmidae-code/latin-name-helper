@@ -33,6 +33,8 @@ struct HUDModel {
     var taxonId: Int?
     var note: String?
     var isPending: Bool
+    var hierarchy: String = ""
+    var schemeTitle: String = ""
 }
 
 final class HUDPanel: NSPanel {
@@ -62,6 +64,7 @@ final class HUDController: NSObject {
     private let syllLabel = NSTextField(labelWithString: "")
     private let ipaLabel = NSTextField(labelWithString: "")
     private let noteLabel = NSTextField(labelWithString: "")
+    private let hierarchyLabel = NSTextField(labelWithString: "")
     private let footerLabel = NSTextField(labelWithString: "")
 
     private var model: HUDModel?
@@ -117,6 +120,11 @@ final class HUDController: NSObject {
         ipaLabel.font = .systemFont(ofSize: 15, weight: .regular)
         ipaLabel.textColor = .secondaryLabelColor
 
+        hierarchyLabel.font = .systemFont(ofSize: 12, weight: .regular)
+        hierarchyLabel.textColor = .secondaryLabelColor
+        hierarchyLabel.lineBreakMode = .byWordWrapping
+        hierarchyLabel.maximumNumberOfLines = 2
+
         noteLabel.font = .systemFont(ofSize: 12, weight: .regular)
         noteLabel.textColor = .tertiaryLabelColor
         noteLabel.lineBreakMode = .byWordWrapping
@@ -130,7 +138,7 @@ final class HUDController: NSObject {
         let sep = NSBox()
         sep.boxType = .separator
 
-        let stack = NSStackView(views: [nameLabel, metaLabel, sep, syllLabel, ipaLabel, noteLabel, footerLabel])
+        let stack = NSStackView(views: [nameLabel, metaLabel, sep, syllLabel, ipaLabel, hierarchyLabel, noteLabel, footerLabel])
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = 6
@@ -138,6 +146,7 @@ final class HUDController: NSObject {
         stack.setCustomSpacing(14, after: metaLabel)
         stack.setCustomSpacing(14, after: sep)
         stack.setCustomSpacing(2, after: syllLabel)
+        stack.setCustomSpacing(10, after: ipaLabel)
         stack.setCustomSpacing(16, after: noteLabel)
         stack.setCustomSpacing(18, after: ipaLabel)
         stack.edgeInsets = NSEdgeInsets(top: 22, left: 24, bottom: 18, right: 24)
@@ -167,7 +176,8 @@ final class HUDController: NSObject {
             refreshButton.widthAnchor.constraint(equalToConstant: 24),
             refreshButton.heightAnchor.constraint(equalToConstant: 22),
             nameLabel.trailingAnchor.constraint(lessThanOrEqualTo: refreshButton.leadingAnchor, constant: -8),
-            noteLabel.trailingAnchor.constraint(lessThanOrEqualTo: effect.trailingAnchor, constant: -24)
+            noteLabel.trailingAnchor.constraint(lessThanOrEqualTo: effect.trailingAnchor, constant: -24),
+            hierarchyLabel.trailingAnchor.constraint(lessThanOrEqualTo: effect.trailingAnchor, constant: -24)
         ])
         sep.translatesAutoresizingMaskIntoConstraints = false
         sep.widthAnchor.constraint(equalTo: stack.widthAnchor, constant: -48).isActive = true
@@ -220,7 +230,11 @@ final class HUDController: NSObject {
         }
 
         syllLabel.attributedStringValue = syllablesAttributed(model.pronunciation)
-        ipaLabel.stringValue = model.pronunciation.ipa
+        ipaLabel.stringValue = model.schemeTitle.isEmpty
+            ? model.pronunciation.ipa
+            : model.pronunciation.ipa + "    · " + model.schemeTitle
+        hierarchyLabel.stringValue = model.hierarchy
+        hierarchyLabel.isHidden = model.hierarchy.isEmpty
         noteLabel.stringValue = model.note ?? ""
         noteLabel.isHidden = (model.note ?? "").isEmpty
 

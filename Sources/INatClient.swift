@@ -11,6 +11,22 @@ struct TaxonResponse: Codable {
     let results: [Taxon]
 }
 
+struct Ancestor: Codable {
+    let id: Int
+    let name: String
+    let rank: String
+    let preferred_common_name: String?
+}
+
+private struct TaxonDetail: Codable {
+    let id: Int
+    let ancestors: [Ancestor]?
+}
+
+private struct TaxonDetailResponse: Codable {
+    let results: [TaxonDetail]
+}
+
 struct CacheEntry: Codable {
     let taxon: Taxon?
     let queriedAs: String
@@ -33,6 +49,8 @@ final class INatClient {
     static let shared = INatClient()
 
     private var memory: [String: CacheEntry] = [:]
+    private var ancestry: [String: [Ancestor]] = [:]
+    private var ancestryURL: URL?
     private var cacheURL: URL?
     // 查到中文名的结果可以放久一点；没有中文名/没收录的，很快过期
     // —— 你在 iNat 上补一个中文名，不该等一周才生效
@@ -67,6 +85,11 @@ final class INatClient {
 
     private func loadCache() {
         guard let dir = supportDir else { return }
+        ancestryURL = dir.appendingPathComponent("ancestors.json")
+        if let data = try? Data(contentsOf: dir.appendingPathComponent("ancestors.json")),
+           let decoded = try? JSONDecoder().decode([String: [Ancestor]].self, from: data) {
+            ancestry = decoded
+        }
         let url = dir.appendingPathComponent("cache.json")
         cacheURL = url
         guard let data = try? Data(contentsOf: url),
@@ -81,7 +104,44 @@ final class INatClient {
 
     func clearCache() {
         memory.removeAll()
+        ancestry.removeAll()
         if let url = cacheURL { try? FileManager.default.removeItem(at: url) }
+    }
+
+    private func saveAncestry() {
+        guard let url = ancestryURL,
+              let data = try? JSONEncoder().encode(ancestry) else { return }
+        try? data.write(to: url, options: .atomic)
+    }
+
+    /// 取某个 taxon 的上级链（含中文名），带缓存
+    func ancestors(of taxonID: Int, forceRefresh: Bool = false,
+                   queue: DispatchQueue = .main,
+                   completion: @escaping ([Ancestor]) -> Void) {
+        let key = String(taxonID)
+        if !forceRefresh, let hit = ancestry[key], !hit.isEmpty {
+            completion(hit)
+            return
+        }
+        guard let url = URL(string: "https://api.inaturalist.org/v1/taxa/\(taxonID)?locale=zh-CN") else {
+            completion([])
+            return
+        }
+        var request = URLRequest(url: url)
+        request.setValue("LatinNameHelper/1.0", forHTTPHeaderField: "User-Agent")
+        session.dataTask(with: request) { data, _, _ in
+            var chain: [Ancestor] = []
+            if let data = data,
+               let resp = try? JSONDecoder().decode(TaxonDetailResponse.self, from: data),
+               let first = resp.results.first {
+                chain = first.ancestors ?? []
+            }
+            if !chain.isEmpty {
+                self.ancestry[key] = chain
+                self.saveAncestry()
+            }
+            queue.async { completion(chain) }
+        }.resume()
     }
 
     private func saveCache() {

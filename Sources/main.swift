@@ -76,9 +76,23 @@ if let ridx = argv.firstIndex(of: "--render"), ridx + 1 < argv.count {
     }
     _ = sem.wait(timeout: .now() + 10)
 
+    let scheme = LatinEngine.Scheme(rawValue: ProcessInfo.processInfo.environment["LATIN_SCHEME"] ?? "british") ?? .british
+    p = LatinEngine.pronounce(name, scheme: scheme)
+
+    var hierarchyText = ""
+    if let id = tid {
+        let semA = DispatchSemaphore(value: 0)
+        INatClient.shared.ancestors(of: id, queue: DispatchQueue.global()) { chain in
+            hierarchyText = AppDelegate.formatHierarchy(chain)
+            semA.signal()
+        }
+        _ = semA.wait(timeout: .now() + 10)
+    }
+
     let hud = HUDController()
     hud.show(HUDModel(name: name, pronunciation: p, commonName: common,
-                      rank: rank, taxonId: tid, note: note, isPending: false))
+                      rank: rank, taxonId: tid, note: note, isPending: false,
+                      hierarchy: hierarchyText, schemeTitle: scheme.title))
     DispatchQueue.main.asyncAfter(deadline: .now() + 0.9) {
         _ = hud.snapshot(to: argv[ridx + 1])
         exit(0)

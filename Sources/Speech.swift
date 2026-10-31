@@ -7,8 +7,21 @@ struct Config: Codable {
     var rate: Int = 160
     var hotKeyCode: UInt32 = 21 // kVK_ANSI_4
     var hotKeyModifiers: UInt32 = 256 // cmdKey
+    var scheme: String = "british"          // british / ecclesiastical / classical
+    var ecclesiasticalVoice: String = "Alice"
 
     static var current: Config = load()
+
+    func save() {
+        guard let base = FileManager.default.urls(for: .applicationSupportDirectory,
+                                                  in: .userDomainMask).first else { return }
+        let url = base.appendingPathComponent("LatinNameHelper/config.json")
+        try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(),
+                                                 withIntermediateDirectories: true)
+        if let data = try? JSONEncoder().encode(self) {
+            try? data.write(to: url, options: .atomic)
+        }
+    }
 
     static func load() -> Config {
         guard let base = FileManager.default.urls(for: .applicationSupportDirectory,
@@ -41,8 +54,12 @@ final class Speech: NSObject, AVSpeechSynthesizerDelegate {
         synth.delegate = self
     }
 
-    func speakLatin(_ text: String) {
-        speak(text, voiceName: Config.current.latinVoice, language: "en-GB", wpm: Config.current.rate)
+    func speakLatin(_ text: String, scheme: LatinEngine.Scheme = .british) {
+        let italian = (scheme == .ecclesiastical)
+        speak(text,
+              voiceName: italian ? Config.current.ecclesiasticalVoice : Config.current.latinVoice,
+              language: italian ? "it-IT" : "en-GB",
+              wpm: Config.current.rate)
     }
 
     func speakChinese(_ text: String) {
