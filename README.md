@@ -33,6 +33,10 @@ name), hit ⌘4, and get its pronunciation and iNaturalist Chinese name.
 
 ![分类位置](预览_分类位置.png)
 
+**iNat 完全没有这个条目时**，会改用 GBIF 的上级分类，再把目、科的名字拿去 iNat 换中文名：
+
+![iNat无GBIF有](预览_iNat无_GBIF有.png)
+
 ## 用法
 
 | 操作 | 效果 |
@@ -128,6 +132,10 @@ security import cert.p12 -k ~/Library/Keychains/login.keychain-db -P latin -T /u
 - 只取 `总科 / 科 / 亚科 / 族 / 亚族 / 属` 这几级，名称优先用 iNat 中文名，没有就显示拉丁名
 - 链条太短（只剩一条）时，自动补上目一级
 - 缓存 `ancestors.json`，同一分类单元不重复请求
+
+**iNat 没这个条目时**：改用 GBIF 返回的 `order / family / genus`，逐个拿拉丁名去 iNat 查中文名
+（比如 `Hosunka` → `半翅目 › 飞虱科`，`Chelogynus` → `膜翅目 › 螯蜂科 › 单爪螯蜂属`）。
+这样即使 iNat 没有这条，也能立刻知道它大概是个什么东西。
 
 ## 数据来源
 

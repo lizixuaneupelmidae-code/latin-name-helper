@@ -1,12 +1,25 @@
 import Foundation
 
-/// GBIF 只用来回答一个问题：iNat 查不到的名字，是不是一个真实有效的学名。
+/// GBIF 的两项用途：确认名字是否有效，以及拿回它的上级分类（目 / 科 / 属）。
+struct GBIFLineage: Codable, Equatable {
+    var order: String?
+    var family: String?
+    var genus: String?
+}
+
 enum GBIFResult {
-    case accepted(String, String)      // 接受名, 阶元
-    case synonym(String, String)       // 接受名, 你查的名字
-    case higherRank(String)            // 只匹配到更高阶元（如只到属）
+    case accepted(String, String, GBIFLineage)   // 接受名, 阶元, 上级
+    case synonym(String, String, GBIFLineage)    // 接受名, 你查的名字, 上级
+    case higherRank(String)
     case none
     case failed(String)
+
+    var lineage: GBIFLineage {
+        switch self {
+        case .accepted(_, _, let l), .synonym(_, _, let l): return l
+        default: return GBIFLineage()
+        }
+    }
 }
 
 private struct GBIFRaw: Codable {
@@ -17,13 +30,18 @@ private struct GBIFRaw: Codable {
     let canonicalName: String?
     let scientificName: String?
     let acceptedUsageKey: Int?
+    let order: String?
+    let family: String?
+    let genus: String?
 }
 
 private struct GBIFName: Codable {
     let canonicalName: String?
     let scientificName: String?
     let rank: String?
-    let taxonomicStatus: String?
+    let order: String?
+    let family: String?
+    let genus: String?
 }
 
 private struct GBIFCacheEntry: Codable {
@@ -31,18 +49,29 @@ private struct GBIFCacheEntry: Codable {
     let time: Date
 }
 
-/// GBIFResult 需要可编码
+/// 带版本号的缓存文件：结构一变（比如新增 lineage）就整体作废，避免读到旧格式
+private struct GBIFCacheFile: Codable {
+    let version: Int
+    let entries: [String: GBIFCacheEntry]
+    static let current = 2
+}
+
 extension GBIFResult: Codable {
-    private enum CodingKeys: String, CodingKey { case kind, a, b }
+    private enum CodingKeys: String, CodingKey { case kind, a, b, order, family, genus }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         let kind = try c.decode(String.self, forKey: .kind)
         let a = try c.decodeIfPresent(String.self, forKey: .a)
         let b = try c.decodeIfPresent(String.self, forKey: .b)
+        var l = GBIFLineage()
+        l.order = try c.decodeIfPresent(String.self, forKey: .order)
+        l.family = try c.decodeIfPresent(String.self, forKey: .family)
+        l.genus = try c.decodeIfPresent(String.self, forKey: .genus)
+
         switch kind {
-        case "accepted": self = .accepted(a ?? "", b ?? "")
-        case "synonym": self = .synonym(a ?? "", b ?? "")
+        case "accepted": self = .accepted(a ?? "", b ?? "", l)
+        case "synonym": self = .synonym(a ?? "", b ?? "", l)
         case "higherRank": self = .higherRank(a ?? "")
         case "failed": self = .failed(a ?? "")
         default: self = .none
@@ -52,10 +81,18 @@ extension GBIFResult: Codable {
     func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
         switch self {
-        case .accepted(let a, let b):
-            try c.encode("accepted", forKey: .kind); try c.encode(a, forKey: .a); try c.encode(b, forKey: .b)
-        case .synonym(let a, let b):
-            try c.encode("synonym", forKey: .kind); try c.encode(a, forKey: .a); try c.encode(b, forKey: .b)
+        case .accepted(let a, let b, let l):
+            try c.encode("accepted", forKey: .kind)
+            try c.encode(a, forKey: .a); try c.encode(b, forKey: .b)
+            try c.encodeIfPresent(l.order, forKey: .order)
+            try c.encodeIfPresent(l.family, forKey: .family)
+            try c.encodeIfPresent(l.genus, forKey: .genus)
+        case .synonym(let a, let b, let l):
+            try c.encode("synonym", forKey: .kind)
+            try c.encode(a, forKey: .a); try c.encode(b, forKey: .b)
+            try c.encodeIfPresent(l.order, forKey: .order)
+            try c.encodeIfPresent(l.family, forKey: .family)
+            try c.encodeIfPresent(l.genus, forKey: .genus)
         case .higherRank(let a):
             try c.encode("higherRank", forKey: .kind); try c.encode(a, forKey: .a)
         case .failed(let a):
@@ -89,13 +126,16 @@ final class GBIFClient {
         let url = dir.appendingPathComponent("gbif.json")
         cacheURL = url
         if let data = try? Data(contentsOf: url),
-           let decoded = try? JSONDecoder().decode([String: GBIFCacheEntry].self, from: data) {
-            memory = decoded
+           let file = try? JSONDecoder().decode(GBIFCacheFile.self, from: data),
+           file.version == GBIFCacheFile.current {
+            memory = file.entries
         }
     }
 
     private func save() {
-        guard let url = cacheURL, let data = try? JSONEncoder().encode(memory) else { return }
+        guard let url = cacheURL,
+              let data = try? JSONEncoder().encode(GBIFCacheFile(version: GBIFCacheFile.current,
+                                                                 entries: memory)) else { return }
         try? data.write(to: url, options: .atomic)
     }
 
@@ -135,16 +175,18 @@ final class GBIFClient {
             let matchType = raw.matchType ?? "NONE"
             let canonical = raw.canonicalName ?? raw.scientificName ?? name
             let rank = (raw.rank ?? "").capitalized
+            var lineage = GBIFLineage(order: raw.order, family: raw.family, genus: raw.genus)
 
             switch matchType {
             case "EXACT", "FUZZY":
                 if (raw.status ?? "") == "SYNONYM", let key = raw.acceptedUsageKey {
-                    self.fetchAcceptedName(key) { accepted in
-                        completion(.synonym(accepted ?? "（未知）", canonical))
+                    self.fetchAccepted(key) { accepted, acceptedLineage in
+                        if let l = acceptedLineage, !l.isEmpty { lineage = l }
+                        completion(.synonym(accepted ?? "（未知）", canonical, lineage))
                     }
                     return
                 }
-                completion(.accepted(canonical, rank))
+                completion(.accepted(canonical, rank, lineage))
             case "HIGHERRANK":
                 completion(.higherRank(canonical))
             default:
@@ -153,18 +195,23 @@ final class GBIFClient {
         }.resume()
     }
 
-    private func fetchAcceptedName(_ key: Int, completion: @escaping (String?) -> Void) {
+    private func fetchAccepted(_ key: Int, completion: @escaping (String?, GBIFLineage?) -> Void) {
         guard let url = URL(string: "https://api.gbif.org/v1/species/\(key)") else {
-            completion(nil)
+            completion(nil, nil)
             return
         }
         session.dataTask(with: url) { data, _, _ in
             guard let data = data,
                   let parsed = try? JSONDecoder().decode(GBIFName.self, from: data) else {
-                completion(nil)
+                completion(nil, nil)
                 return
             }
-            completion(parsed.canonicalName ?? parsed.scientificName)
+            let lineage = GBIFLineage(order: parsed.order, family: parsed.family, genus: parsed.genus)
+            completion(parsed.canonicalName ?? parsed.scientificName, lineage)
         }.resume()
     }
+}
+
+extension GBIFLineage {
+    var isEmpty: Bool { order == nil && family == nil && genus == nil }
 }

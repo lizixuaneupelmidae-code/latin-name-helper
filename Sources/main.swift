@@ -25,6 +25,7 @@ if let ridx = argv.firstIndex(of: "--render"), ridx + 1 < argv.count {
     var rank: String?
     var tid: Int?
     var note: String?
+    var hierarchyText = ""
     let sem = DispatchSemaphore(value: 0)
     INatClient.shared.lookup(name, direction: chineseMode ? .chinese : .latin,
                              queue: DispatchQueue.global()) { result in
@@ -56,11 +57,14 @@ if let ridx = argv.firstIndex(of: "--render"), ridx + 1 < argv.count {
             } else {
                 lines.append("iNat 没有收录这个名称")
             }
+            var lineage = GBIFLineage()
             let sem3 = DispatchSemaphore(value: 0)
             GBIFClient.shared.match(name, queue: DispatchQueue.global()) { r in
                 switch r {
-                case .accepted(let a, let rank): lines.append("GBIF：接受名 \(a)（\(rank.lowercased())）")
-                case .synonym(let a, let cur): lines.append("GBIF：\(cur) 为异名，接受名 \(a)")
+                case .accepted(let a, let rank, let l):
+                    lines.append("GBIF：接受名 \(a)（\(rank.lowercased())）"); lineage = l
+                case .synonym(let a, let cur, let l):
+                    lines.append("GBIF：\(cur) 为异名，接受名 \(a)"); lineage = l
                 case .higherRank(let h): lines.append("GBIF：只匹配到 \(h)")
                 case .none: lines.append("GBIF 也没匹配到，请检查拼写")
                 case .failed: break
@@ -69,6 +73,21 @@ if let ridx = argv.firstIndex(of: "--render"), ridx + 1 < argv.count {
             }
             _ = sem3.wait(timeout: .now() + 10)
             note = lines.joined(separator: "\n")
+
+            var chainLatin: [String] = []
+            if let o = lineage.order, !o.isEmpty { chainLatin.append(o) }
+            if let f = lineage.family, !f.isEmpty { chainLatin.append(f) }
+            if let g = lineage.genus, !g.isEmpty, g.caseInsensitiveCompare(name) != .orderedSame {
+                chainLatin.append(g)
+            }
+            if !chainLatin.isEmpty {
+                let sem4 = DispatchSemaphore(value: 0)
+                AppDelegate.localizeChain(chainLatin, queue: DispatchQueue.global()) { localized in
+                    hierarchyText = localized.joined(separator: " › ")
+                    sem4.signal()
+                }
+                _ = sem4.wait(timeout: .now() + 15)
+            }
         case .failed(let msg):
             note = "查询失败：\(msg)"
         }
@@ -79,8 +98,7 @@ if let ridx = argv.firstIndex(of: "--render"), ridx + 1 < argv.count {
     let scheme = LatinEngine.Scheme(rawValue: ProcessInfo.processInfo.environment["LATIN_SCHEME"] ?? "british") ?? .british
     p = LatinEngine.pronounce(name, scheme: scheme)
 
-    var hierarchyText = ""
-    if let id = tid {
+    if let id = tid, hierarchyText.isEmpty {
         let semA = DispatchSemaphore(value: 0)
         INatClient.shared.ancestors(of: id, queue: DispatchQueue.global()) { chain in
             hierarchyText = AppDelegate.formatHierarchy(chain)

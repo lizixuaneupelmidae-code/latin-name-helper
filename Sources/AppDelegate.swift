@@ -354,6 +354,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         var genusLatin: String?
         var genusCN: String?
         var gbifLine: String?
+        var lineage = GBIFLineage()
 
         let group = DispatchGroup()
 
@@ -371,10 +372,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         group.enter()
         GBIFClient.shared.match(name, forceRefresh: force) { result in
             switch result {
-            case .accepted(let accepted, let rank):
+            case .accepted(let accepted, let rank, let l):
                 gbifLine = "GBIF：接受名 \(accepted)（\(rank.lowercased())）"
-            case .synonym(let accepted, let current):
+                lineage = l
+            case .synonym(let accepted, let current, let l):
                 gbifLine = "GBIF：\(current) 为异名，接受名 \(accepted)"
+                lineage = l
             case .higherRank(let higher):
                 gbifLine = "GBIF：只匹配到 \(higher)"
             case .none:
@@ -399,10 +402,64 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
             if let gbif = gbifLine { lines.append(gbif) }
 
-            self.hud.update(HUDModel(name: name, pronunciation: p, commonName: nil,
-                                     rank: nil, taxonId: nil,
-                                     note: lines.joined(separator: "\n"), isPending: false))
+            var model = HUDModel(name: name, pronunciation: p, commonName: nil,
+                                 rank: nil, taxonId: nil,
+                                 note: lines.joined(separator: "\n"), isPending: false,
+                                 schemeTitle: self.scheme.title)
+
+            // GBIF 给了上级（目/科/属）：换成本地中文名，填进层级行
+            var chainLatin: [String] = []
+            if let order = lineage.order, !order.isEmpty { chainLatin.append(order) }
+            if let family = lineage.family, !family.isEmpty { chainLatin.append(family) }
+            if let latinGenus = genusLatin ?? lineage.genus,
+               !latinGenus.isEmpty,
+               latinGenus.caseInsensitiveCompare(name) != .orderedSame {
+                chainLatin.append(latinGenus)
+            }
+
+            guard !chainLatin.isEmpty else {
+                self.hud.update(model)
+                return
+            }
+            self.localizedChain(chainLatin) { localized in
+                model.hierarchy = localized.joined(separator: " › ")
+                self.hud.update(model)
+            }
         }
+    }
+
+    /// 把一串拉丁阶元名逐个换成 iNat 中文名，查不到就保留拉丁名
+    static func localizeChain(_ names: [String], queue: DispatchQueue = .main,
+                              completion: @escaping ([String]) -> Void) {
+        var result = names
+        let group = DispatchGroup()
+        for (i, latin) in names.enumerated() {
+            group.enter()
+            INatClient.shared.lookup(latin, queue: queue) { outcome in
+                if case .found(let taxon, _) = outcome,
+                   let cn = taxon.preferred_common_name, !cn.isEmpty {
+                    result[i] = cn
+                }
+                group.leave()
+            }
+        }
+        group.notify(queue: queue) { completion(result) }
+    }
+
+    private func localizedChain(_ names: [String], completion: @escaping ([String]) -> Void) {
+        var result = names
+        let group = DispatchGroup()
+        for (i, latin) in names.enumerated() {
+            group.enter()
+            INatClient.shared.lookup(latin) { outcome in
+                if case .found(let taxon, _) = outcome,
+                   let cn = taxon.preferred_common_name, !cn.isEmpty {
+                    result[i] = cn
+                }
+                group.leave()
+            }
+        }
+        group.notify(queue: .main) { completion(result) }
     }
 
     // MARK: - 发音习惯
