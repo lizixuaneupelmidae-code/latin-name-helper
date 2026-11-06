@@ -26,6 +26,7 @@ if let ridx = argv.firstIndex(of: "--render"), ridx + 1 < argv.count {
     var tid: Int?
     var note: String?
     var hierarchyText = ""
+    var gbifFlag: String?
     let sem = DispatchSemaphore(value: 0)
     INatClient.shared.lookup(name, direction: chineseMode ? .chinese : .latin,
                              queue: DispatchQueue.global()) { result in
@@ -61,8 +62,11 @@ if let ridx = argv.firstIndex(of: "--render"), ridx + 1 < argv.count {
             let sem3 = DispatchSemaphore(value: 0)
             GBIFClient.shared.match(name, queue: DispatchQueue.global()) { r in
                 switch r {
-                case .accepted(let a, let rank, let l):
-                    lines.append("GBIF：接受名 \(a)（\(rank.lowercased())）"); lineage = l
+                case .accepted(let a, let rank, let st, let l):
+                    let flag = AppDelegate.statusFlag(st)
+                    lines.append("GBIF：接受名 \(a)（\(rank.lowercased())）" + (flag.map { " · \($0)" } ?? ""))
+                    if let f = flag { gbifFlag = f }
+                    lineage = l
                 case .synonym(let a, let cur, let l):
                     lines.append("GBIF：\(cur) 为异名，接受名 \(a)"); lineage = l
                 case .higherRank(let h): lines.append("GBIF：只匹配到 \(h)")
@@ -107,10 +111,15 @@ if let ridx = argv.firstIndex(of: "--render"), ridx + 1 < argv.count {
         _ = semA.wait(timeout: .now() + 10)
     }
 
+    var model = HUDModel(name: name, pronunciation: p, commonName: common,
+                         rank: rank, taxonId: tid, note: note, isPending: false,
+                         hierarchy: hierarchyText, schemeTitle: scheme.title)
+    if let n = note, !n.isEmpty {
+        model.noteAttributed = AppDelegate.richNote(n.components(separatedBy: "\n"), flag: gbifFlag)
+    }
+
     let hud = HUDController()
-    hud.show(HUDModel(name: name, pronunciation: p, commonName: common,
-                      rank: rank, taxonId: tid, note: note, isPending: false,
-                      hierarchy: hierarchyText, schemeTitle: scheme.title))
+    hud.show(model)
     DispatchQueue.main.asyncAfter(deadline: .now() + 0.9) {
         _ = hud.snapshot(to: argv[ridx + 1])
         exit(0)

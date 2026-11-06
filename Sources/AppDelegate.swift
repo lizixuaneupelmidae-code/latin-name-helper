@@ -354,6 +354,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         var genusLatin: String?
         var genusCN: String?
         var gbifLine: String?
+        var gbifFlag: String?
         var lineage = GBIFLineage()
 
         let group = DispatchGroup()
@@ -372,8 +373,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         group.enter()
         GBIFClient.shared.match(name, forceRefresh: force) { result in
             switch result {
-            case .accepted(let accepted, let rank, let l):
-                gbifLine = "GBIF：接受名 \(accepted)（\(rank.lowercased())）"
+            case .accepted(let accepted, let rank, let status, let l):
+                let flag = AppDelegate.statusFlag(status)
+                gbifLine = "GBIF：接受名 \(accepted)（\(rank.lowercased())）" + (flag.map { " · \($0)" } ?? "")
+                if let f = flag { gbifFlag = f }
                 lineage = l
             case .synonym(let accepted, let current, let l):
                 gbifLine = "GBIF：\(current) 为异名，接受名 \(accepted)"
@@ -406,6 +409,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                                  rank: nil, taxonId: nil,
                                  note: lines.joined(separator: "\n"), isPending: false,
                                  schemeTitle: self.scheme.title)
+            model.noteAttributed = AppDelegate.richNote(lines, flag: gbifFlag)
 
             // GBIF 给了上级（目/科/属）：换成本地中文名，填进层级行
             var chainLatin: [String] = []
@@ -426,6 +430,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self.hud.update(model)
             }
         }
+    }
+
+    /// GBIF 状态里需要提醒的（存疑、误用、未定），返回中文标记
+    static func statusFlag(_ status: String) -> String? {
+        switch status.uppercased() {
+        case "DOUBTFUL": return "存疑"
+        case "MISAPPLIED": return "误用"
+        case "UNRESOLVED": return "未定"
+        case "PROVISIONALLY_ACCEPTED": return "暂定"
+        default: return nil
+        }
+    }
+
+    /// 把提醒词染成橙色
+    static func richNote(_ lines: [String], flag: String?) -> NSAttributedString {
+        let base = NSMutableAttributedString(
+            string: lines.joined(separator: "\n"),
+            attributes: [.font: NSFont.systemFont(ofSize: 12),
+                         .foregroundColor: NSColor.secondaryLabelColor])
+        if let flag = flag, let r = base.string.range(of: flag) {
+            base.addAttributes([.foregroundColor: NSColor.systemOrange,
+                                .font: NSFont.systemFont(ofSize: 12, weight: .medium)],
+                               range: NSRange(r, in: base.string))
+        }
+        return base
     }
 
     /// 把一串拉丁阶元名逐个换成 iNat 中文名，查不到就保留拉丁名

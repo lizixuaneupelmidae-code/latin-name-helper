@@ -8,7 +8,7 @@ struct GBIFLineage: Codable, Equatable {
 }
 
 enum GBIFResult {
-    case accepted(String, String, GBIFLineage)   // 接受名, 阶元, 上级
+    case accepted(String, String, String, GBIFLineage)   // 接受名, 阶元, 状态, 上级
     case synonym(String, String, GBIFLineage)    // 接受名, 你查的名字, 上级
     case higherRank(String)
     case none
@@ -16,7 +16,7 @@ enum GBIFResult {
 
     var lineage: GBIFLineage {
         switch self {
-        case .accepted(_, _, let l), .synonym(_, _, let l): return l
+        case .accepted(_, _, _, let l), .synonym(_, _, let l): return l
         default: return GBIFLineage()
         }
     }
@@ -53,11 +53,11 @@ private struct GBIFCacheEntry: Codable {
 private struct GBIFCacheFile: Codable {
     let version: Int
     let entries: [String: GBIFCacheEntry]
-    static let current = 2
+    static let current = 3
 }
 
 extension GBIFResult: Codable {
-    private enum CodingKeys: String, CodingKey { case kind, a, b, order, family, genus }
+    private enum CodingKeys: String, CodingKey { case kind, a, b, order, family, genus, status }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -70,7 +70,7 @@ extension GBIFResult: Codable {
         l.genus = try c.decodeIfPresent(String.self, forKey: .genus)
 
         switch kind {
-        case "accepted": self = .accepted(a ?? "", b ?? "", l)
+        case "accepted": self = .accepted(a ?? "", b ?? "", try c.decodeIfPresent(String.self, forKey: .status) ?? "", l)
         case "synonym": self = .synonym(a ?? "", b ?? "", l)
         case "higherRank": self = .higherRank(a ?? "")
         case "failed": self = .failed(a ?? "")
@@ -81,9 +81,10 @@ extension GBIFResult: Codable {
     func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
         switch self {
-        case .accepted(let a, let b, let l):
+        case .accepted(let a, let b, let st, let l):
             try c.encode("accepted", forKey: .kind)
             try c.encode(a, forKey: .a); try c.encode(b, forKey: .b)
+            try c.encode(st, forKey: .status)
             try c.encodeIfPresent(l.order, forKey: .order)
             try c.encodeIfPresent(l.family, forKey: .family)
             try c.encodeIfPresent(l.genus, forKey: .genus)
@@ -186,7 +187,7 @@ final class GBIFClient {
                     }
                     return
                 }
-                completion(.accepted(canonical, rank, lineage))
+                completion(.accepted(canonical, rank, raw.status ?? "", lineage))
             case "HIGHERRANK":
                 completion(.higherRank(canonical))
             default:

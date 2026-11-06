@@ -137,6 +137,16 @@ security import cert.p12 -k ~/Library/Keychains/login.keychain-db -P latin -T /u
 （比如 `Hosunka` → `半翅目 › 飞虱科`，`Chelogynus` → `膜翅目 › 螯蜂科 › 单爪螯蜂属`）。
 这样即使 iNat 没有这条，也能立刻知道它大概是个什么东西。
 
+GBIF 的状态会跟在后面，需要留意的用橙色标出：
+
+| GBIF status | 面板显示 |
+|---|---|
+| `ACCEPTED` | 不额外标注 |
+| `DOUBTFUL` | `· 存疑`（橙） |
+| `MISAPPLIED` | `· 误用`（橙） |
+| `UNRESOLVED` | `· 未定`（橙） |
+| `SYNONYM` | 写作「X 为异名，接受名 Y」 |
+
 ## 数据来源
 
 - **中文名**：iNaturalist `api.inaturalist.org/v1/taxa/autocomplete?locale=zh-CN`

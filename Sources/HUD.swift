@@ -35,6 +35,7 @@ struct HUDModel {
     var isPending: Bool
     var hierarchy: String = ""
     var schemeTitle: String = ""
+    var noteAttributed: NSAttributedString? = nil
 }
 
 final class HUDPanel: NSPanel {
@@ -235,8 +236,13 @@ final class HUDController: NSObject {
             : model.pronunciation.ipa + "    · " + model.schemeTitle
         hierarchyLabel.stringValue = model.hierarchy
         hierarchyLabel.isHidden = model.hierarchy.isEmpty
-        noteLabel.stringValue = model.note ?? ""
-        noteLabel.isHidden = (model.note ?? "").isEmpty
+        if let rich = model.noteAttributed {
+            noteLabel.attributedStringValue = rich
+            noteLabel.isHidden = rich.string.isEmpty
+        } else {
+            noteLabel.stringValue = model.note ?? ""
+            noteLabel.isHidden = (model.note ?? "").isEmpty
+        }
 
         layoutAndShow()
     }
